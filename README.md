@@ -53,11 +53,11 @@ npm run dev
 ### Docker
 
 ```bash
-# Build and run with Docker Compose
-docker-compose up --build
-
-# Or run in detached mode
+# Build and run in background (Recommended)
 docker-compose up -d --build
+
+# View logs
+docker-compose logs -f
 ```
 
 - Frontend: http://localhost:9112
