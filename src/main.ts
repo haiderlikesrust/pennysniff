@@ -5,7 +5,9 @@ import { World } from './world';
 import { UI } from './ui';
 
 // Server connection
-const SERVER_URL = import.meta.env.PROD ? '' : 'http://localhost:9113';
+const SERVER_URL = import.meta.env.PROD
+  ? 'https://api.coinsniffer.fun'
+  : 'http://localhost:9113';
 
 class PennySnifferGame {
   private socket: Socket;
