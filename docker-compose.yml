@@ -1,0 +1,48 @@
+version: '3.8'
+
+services:
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: pennysniffer-frontend
+    ports:
+      - "9112:9112"
+    depends_on:
+      - backend
+    environment:
+      - NODE_ENV=production
+    restart: unless-stopped
+    networks:
+      - pennysniffer-network
+
+  backend:
+    build:
+      context: ./server
+      dockerfile: Dockerfile
+    container_name: pennysniffer-backend
+    ports:
+      - "9113:9113"
+    environment:
+      - NODE_ENV=production
+      - PORT=9113
+      - HELIUS_API_KEY=${HELIUS_API_KEY:-}
+      - REWARD_WALLET_PRIVATE_KEY=${REWARD_WALLET_PRIVATE_KEY:-}
+      - FEE_RESERVE_SOL=${FEE_RESERVE_SOL:-0.01}
+      - MAX_PLAYERS=${MAX_PLAYERS:-10}
+      - LOBBY_TIMER_SECONDS=${LOBBY_TIMER_SECONDS:-180}
+      - GAME_DURATION_SECONDS=${GAME_DURATION_SECONDS:-120}
+      - TOTAL_PENNIES=${TOTAL_PENNIES:-75}
+    restart: unless-stopped
+    networks:
+      - pennysniffer-network
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:9113/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+networks:
+  pennysniffer-network:
+    driver: bridge
