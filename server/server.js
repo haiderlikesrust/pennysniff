@@ -82,15 +82,15 @@ io.on('connection', (socket) => {
     });
 
     // ============ VOICE CHAT SIGNALING ============
-    
+
     // Player joins voice chat
     socket.on('voice_join', () => {
         voiceRooms.set(socket.id, { inVoice: true, muted: false });
         console.log(`🎤 Player ${socket.id} joined voice chat`);
-        
+
         // Notify all other voice users about new peer
         socket.broadcast.emit('voice_peer_joined', { peerId: socket.id });
-        
+
         // Send list of existing voice peers to new joiner
         const existingPeers = [];
         voiceRooms.forEach((state, peerId) => {
@@ -152,13 +152,13 @@ io.on('connection', (socket) => {
     // Disconnect handling
     socket.on('disconnect', () => {
         console.log(`Player disconnected: ${socket.id}`);
-        
+
         // Clean up voice chat
         if (voiceRooms.has(socket.id)) {
             voiceRooms.delete(socket.id);
             socket.broadcast.emit('voice_peer_left', { peerId: socket.id });
         }
-        
+
         gameManager.removePlayer(socket.id);
         io.emit('lobby_update', gameManager.getLobbyState());
         io.emit('player_left', { playerId: socket.id });
@@ -178,5 +178,5 @@ app.get('/api/leaderboard', (req, res) => {
 });
 
 server.listen(PORT, () => {
-    console.log(`🪙 PennySniffer server running on port ${PORT}`);
+    console.log(`🪙 CoinSniffer server running on port ${PORT}`);
 });

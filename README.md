@@ -1,8 +1,8 @@
-# 🪙 PennySniffer
+# 🪙 CoinSniffer
 
-A multiplayer 3D browser game where players compete to collect pennies in an Israeli-themed environment. Built with Solana blockchain integration for real rewards!
+A multiplayer 3D browser game where players compete to collect coins in an Israeli-themed environment. Built with Solana blockchain integration for real rewards!
 
-![PennySniffer](https://via.placeholder.com/800x400?text=PennySniffer+Game)
+![CoinSniffer](https://via.placeholder.com/800x400?text=CoinSniffer+Game)
 
 ## 🎮 Features
 
@@ -17,7 +17,7 @@ A multiplayer 3D browser game where players compete to collect pennies in an Isr
 
 1. Enter your Solana wallet address
 2. Wait in lobby for other players (3-minute timer)
-3. When game starts, collect as many pennies as possible
+3. When game starts, collect as many coins as possible
 4. Top 3 players split the reward pool (50%/30%/20%)
 
 ### Controls

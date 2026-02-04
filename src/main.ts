@@ -9,7 +9,7 @@ const SERVER_URL = import.meta.env.PROD
   ? 'https://api.coinsniffer.fun'
   : 'http://localhost:9113';
 
-class PennySnifferGame {
+class CoinSnifferGame {
   private socket: Socket;
   private scene: THREE.Scene;
   private camera: THREE.PerspectiveCamera;
@@ -121,19 +121,19 @@ class PennySnifferGame {
       // Generate a classic "coin" sound with pitch bend
       for (let i = 0; i < buffer.length; i++) {
         const t = i / sampleRate;
-        
+
         // Two-tone coin sound (like Mario)
         const freq1 = 988; // B5
         const freq2 = 1319; // E6
-        
+
         // Switch frequency halfway through
         const freq = t < 0.075 ? freq1 : freq2;
-        
+
         // Sharp attack, quick decay
-        const envelope = t < 0.01 
+        const envelope = t < 0.01
           ? t / 0.01 // Quick attack
           : Math.exp(-(t - 0.01) * 15); // Decay
-        
+
         data[i] = envelope * Math.sin(2 * Math.PI * freq * t) * 0.8;
       }
 
@@ -1156,5 +1156,5 @@ class PennySnifferGame {
 
 // Start the game when page loads
 document.addEventListener('DOMContentLoaded', () => {
-  new PennySnifferGame();
+  new CoinSnifferGame();
 });
