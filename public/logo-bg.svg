@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200">
+  <defs>
+    <linearGradient id="skin" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#ffe0bd;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#ffcd94;stop-opacity:1" />
+    </linearGradient>
+  </defs>
+
+  <!-- Matte Black Background -->
+  <rect width="200" height="200" rx="40" fill="#1a1a1a" />
+
+  <!-- Nose Shape -->
+  <g transform="translate(0, 0)">
+      <path d="M 60 40 
+               C 150 40, 180 120, 120 160
+               C 100 175, 70 170, 60 150
+               " 
+            fill="url(#skin)" stroke="#0038b8" stroke-width="5" stroke-linejoin="round" />
+            
+      <!-- Nostril -->
+      <ellipse cx="110" cy="140" rx="15" ry="10" fill="#cc8e5e" />
+      
+      <!-- Sniffing motion lines -->
+      <path d="M 130 160 L 150 180" stroke="#0038b8" stroke-width="4" stroke-linecap="round" />
+      <path d="M 140 150 L 165 160" stroke="#0038b8" stroke-width="4" stroke-linecap="round" />
+      <path d="M 140 140 L 170 130" stroke="#0038b8" stroke-width="4" stroke-linecap="round" />
+  </g>
+
+</svg>
