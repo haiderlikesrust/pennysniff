@@ -18,7 +18,6 @@ class PennySnifferGame {
   private ui: UI;
 
   private playerId: string = '';
-  private _walletAddress: string = ''; // Stored for potential future use
   private isPlaying: boolean = false;
   private isSpectating: boolean = false;
 
@@ -105,13 +104,13 @@ class PennySnifferGame {
   private async setupAudio(): Promise<void> {
     try {
       this.audioContext = new AudioContext();
-      
+
       // Create coin collection sound programmatically
       const sampleRate = this.audioContext.sampleRate;
       const duration = 0.3;
       const buffer = this.audioContext.createBuffer(1, sampleRate * duration, sampleRate);
       const data = buffer.getChannelData(0);
-      
+
       // Generate a pleasant "ding" sound
       for (let i = 0; i < buffer.length; i++) {
         const t = i / sampleRate;
@@ -119,7 +118,7 @@ class PennySnifferGame {
         const freq1 = 880; // A5
         const freq2 = 1320; // E6
         const freq3 = 1760; // A6
-        
+
         const envelope = Math.exp(-t * 10); // Quick decay
         data[i] = envelope * (
           0.5 * Math.sin(2 * Math.PI * freq1 * t) +
@@ -127,7 +126,7 @@ class PennySnifferGame {
           0.2 * Math.sin(2 * Math.PI * freq3 * t)
         );
       }
-      
+
       this.coinSound = buffer;
       console.log('🔊 Audio system initialized');
     } catch (error) {
@@ -137,25 +136,25 @@ class PennySnifferGame {
 
   private playCoinSound(): void {
     if (!this.audioContext || !this.coinSound) return;
-    
+
     // Resume audio context if suspended (browser autoplay policy)
     if (this.audioContext.state === 'suspended') {
       this.audioContext.resume();
     }
-    
+
     const source = this.audioContext.createBufferSource();
     source.buffer = this.coinSound;
-    
+
     const gainNode = this.audioContext.createGain();
     gainNode.gain.value = 0.3; // Volume
-    
+
     source.connect(gainNode);
     gainNode.connect(this.audioContext.destination);
     source.start();
   }
 
   // ============ VOICE CHAT METHODS ============
-  
+
   private setupVoiceChatEvents(): void {
     // Receive list of existing voice peers when joining
     this.socket.on('voice_peers_list', async (data: { peers: string[] }) => {
@@ -274,7 +273,7 @@ class PennySnifferGame {
       pc.close();
       this.peerConnections.delete(peerId);
     }
-    
+
     // Remove audio element
     const audioEl = document.getElementById(`voice-audio-${peerId}`);
     if (audioEl) {
@@ -315,12 +314,12 @@ class PennySnifferGame {
 
   toggleMute(): void {
     if (!this.localStream) return;
-    
+
     this.isMuted = !this.isMuted;
     this.localStream.getAudioTracks().forEach(track => {
       track.enabled = !this.isMuted;
     });
-    
+
     this.socket.emit('voice_mute_toggle', { muted: this.isMuted });
     this.ui.updateVoiceStatus(true, this.isMuted);
   }
@@ -548,7 +547,6 @@ class PennySnifferGame {
       joinBtn.addEventListener('click', () => {
         const wallet = walletInput?.value.trim();
         if (wallet && wallet.length >= 32) {
-          this._walletAddress = wallet;
           this.socket.emit('join_lobby', { walletAddress: wallet });
         } else {
           this.ui.showMessage('Please enter a valid Solana wallet address', 'error');
