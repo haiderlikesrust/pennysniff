@@ -35,7 +35,7 @@
         <div class="info-card">
           <div class="info-icon">👥</div>
           <div class="info-content">
-            <span id="player-count">0</span>/<span id="max-players">10</span>
+            <span id="player-count">0</span>/<span id="max-players">25</span>
             <small>Players in Lobby</small>
           </div>
         </div>
@@ -77,16 +77,25 @@
           <span class="hud-icon">🪙</span>
           <span id="hud-score">0</span>
         </div>
+        <!-- Voice Chat Controls -->
+        <div class="hud-item voice-controls">
+          <button id="voice-btn" class="voice-btn">🎤 Join Voice</button>
+          <button id="mute-btn" class="mute-btn" style="display: none;">🎤 Mute</button>
+        </div>
       </div>
       <div class="hud-center">
         <div class="hud-timer">
           <span id="hud-timer">2:00</span>
         </div>
+        <!-- Voice Indicator -->
+        <div id="voice-indicator" class="voice-indicator" style="display: none;">
+          <span class="voice-icon">🎤</span> Voice Active
+        </div>
       </div>
       <div class="hud-right">
         <div class="hud-item pennies-left">
           <span class="hud-icon">📍</span>
-          <span id="hud-pennies-left">75</span>
+          <span id="hud-pennies-left">150</span>
           <small>left</small>
         </div>
       </div>

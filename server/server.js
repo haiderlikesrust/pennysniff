@@ -15,11 +15,15 @@ const io = new Server(server, {
     cors: {
         origin: "*",
         methods: ["GET", "POST"]
-    }
+    },
+    maxHttpBufferSize: 1e8 // 100MB for voice data
 });
 
 const PORT = process.env.PORT || 3001;
 const gameManager = new GameManager(io);
+
+// Voice chat rooms - track who's in voice
+const voiceRooms = new Map(); // socketId -> { inVoice: boolean, muted: boolean }
 
 // Socket.IO connection handling
 io.on('connection', (socket) => {
@@ -77,9 +81,84 @@ io.on('connection', (socket) => {
         }
     });
 
+    // ============ VOICE CHAT SIGNALING ============
+    
+    // Player joins voice chat
+    socket.on('voice_join', () => {
+        voiceRooms.set(socket.id, { inVoice: true, muted: false });
+        console.log(`🎤 Player ${socket.id} joined voice chat`);
+        
+        // Notify all other voice users about new peer
+        socket.broadcast.emit('voice_peer_joined', { peerId: socket.id });
+        
+        // Send list of existing voice peers to new joiner
+        const existingPeers = [];
+        voiceRooms.forEach((state, peerId) => {
+            if (peerId !== socket.id && state.inVoice) {
+                existingPeers.push(peerId);
+            }
+        });
+        socket.emit('voice_peers_list', { peers: existingPeers });
+    });
+
+    // Player leaves voice chat
+    socket.on('voice_leave', () => {
+        voiceRooms.delete(socket.id);
+        console.log(`🔇 Player ${socket.id} left voice chat`);
+        socket.broadcast.emit('voice_peer_left', { peerId: socket.id });
+    });
+
+    // WebRTC signaling - offer
+    socket.on('voice_offer', (data) => {
+        const { targetId, offer } = data;
+        io.to(targetId).emit('voice_offer', {
+            fromId: socket.id,
+            offer
+        });
+    });
+
+    // WebRTC signaling - answer
+    socket.on('voice_answer', (data) => {
+        const { targetId, answer } = data;
+        io.to(targetId).emit('voice_answer', {
+            fromId: socket.id,
+            answer
+        });
+    });
+
+    // WebRTC signaling - ICE candidate
+    socket.on('voice_ice_candidate', (data) => {
+        const { targetId, candidate } = data;
+        io.to(targetId).emit('voice_ice_candidate', {
+            fromId: socket.id,
+            candidate
+        });
+    });
+
+    // Toggle mute status
+    socket.on('voice_mute_toggle', (data) => {
+        const voiceState = voiceRooms.get(socket.id);
+        if (voiceState) {
+            voiceState.muted = data.muted;
+            socket.broadcast.emit('voice_peer_muted', {
+                peerId: socket.id,
+                muted: data.muted
+            });
+        }
+    });
+
+    // ============ END VOICE CHAT ============
+
     // Disconnect handling
     socket.on('disconnect', () => {
         console.log(`Player disconnected: ${socket.id}`);
+        
+        // Clean up voice chat
+        if (voiceRooms.has(socket.id)) {
+            voiceRooms.delete(socket.id);
+            socket.broadcast.emit('voice_peer_left', { peerId: socket.id });
+        }
+        
         gameManager.removePlayer(socket.id);
         io.emit('lobby_update', gameManager.getLobbyState());
         io.emit('player_left', { playerId: socket.id });

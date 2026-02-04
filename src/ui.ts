@@ -3,12 +3,14 @@ export class UI {
     private gameScreen: HTMLElement | null;
     private resultsScreen: HTMLElement | null;
     private loadingScreen: HTMLElement | null;
+    private voiceIndicator: HTMLElement | null;
 
     constructor() {
         this.lobbyScreen = document.getElementById('lobby-screen');
         this.gameScreen = document.getElementById('game-screen');
         this.resultsScreen = document.getElementById('results-screen');
         this.loadingScreen = document.getElementById('loading-screen');
+        this.voiceIndicator = document.getElementById('voice-indicator');
     }
 
     showScreen(screen: 'lobby' | 'game' | 'results' | 'loading'): void {
@@ -195,5 +197,92 @@ export class UI {
         if (playAgainBtn) {
             playAgainBtn.disabled = true;
         }
+    }
+
+    // Voice chat UI methods
+    updateVoiceStatus(inVoice: boolean, muted: boolean): void {
+        const voiceBtn = document.getElementById('voice-btn');
+        const muteBtn = document.getElementById('mute-btn');
+        const voiceIndicator = document.getElementById('voice-indicator');
+
+        if (voiceBtn) {
+            voiceBtn.textContent = inVoice ? '🔇 Leave Voice' : '🎤 Join Voice';
+            voiceBtn.classList.toggle('active', inVoice);
+        }
+
+        if (muteBtn) {
+            muteBtn.style.display = inVoice ? 'block' : 'none';
+            muteBtn.textContent = muted ? '🔇 Unmute' : '🎤 Mute';
+            muteBtn.classList.toggle('muted', muted);
+        }
+
+        if (voiceIndicator) {
+            voiceIndicator.style.display = inVoice ? 'flex' : 'none';
+            voiceIndicator.classList.toggle('muted', muted);
+            voiceIndicator.innerHTML = muted 
+                ? '<span class="voice-icon">🔇</span> Muted'
+                : '<span class="voice-icon">🎤</span> Voice Active';
+        }
+    }
+
+    updateVoicePeerMuted(peerId: string, muted: boolean): void {
+        // Could update a voice participants list UI here
+        console.log(`Peer ${peerId} ${muted ? 'muted' : 'unmuted'}`);
+    }
+
+    // Update results to show proportional rewards
+    showResultsWithProportional(rankings: any[], winners: any[], totalTop3Coins: number): void {
+        // Podium places
+        const places = ['first', 'second', 'third'];
+
+        winners.forEach((winner, index) => {
+            const walletEl = document.getElementById(`${places[index]}-wallet`);
+            const scoreEl = document.getElementById(`${places[index]}-score`);
+            const rewardEl = document.querySelector(`#results-screen .podium-place.${places[index]} .place-reward`);
+
+            if (walletEl) {
+                walletEl.textContent = winner.walletAddress.slice(0, 6) + '...' + winner.walletAddress.slice(-4);
+            }
+            if (scoreEl) {
+                scoreEl.textContent = `${winner.score} 🪙`;
+            }
+            if (rewardEl) {
+                // Show proportional percentage
+                const percent = totalTop3Coins > 0 
+                    ? Math.round((winner.score / totalTop3Coins) * 100)
+                    : Math.round(100 / winners.length);
+                rewardEl.textContent = `${percent}% SOL`;
+            }
+        });
+
+        // Hide unused podium places if less than 3 winners
+        for (let i = winners.length; i < 3; i++) {
+            const placeEl = document.querySelector(`#results-screen .podium-place.${places[i]}`);
+            if (placeEl) {
+                (placeEl as HTMLElement).style.display = 'none';
+            }
+        }
+
+        // Full rankings
+        const rankingsEl = document.getElementById('final-rankings');
+        if (rankingsEl) {
+            rankingsEl.innerHTML = '';
+            rankings.forEach((player, index) => {
+                const li = document.createElement('li');
+                const medal = index === 0 ? '🥇' : index === 1 ? '🥈' : index === 2 ? '🥉' : '';
+                const isTop3 = index < 3;
+                const rewardInfo = isTop3 && totalTop3Coins > 0
+                    ? ` (${Math.round((player.score / totalTop3Coins) * 100)}% reward)`
+                    : '';
+                li.innerHTML = `
+          <span>${index + 1}. ${medal} ${player.walletAddress.slice(0, 6)}...${player.walletAddress.slice(-4)}</span>
+          <span>${player.score} 🪙${rewardInfo}</span>
+        `;
+                rankingsEl.appendChild(li);
+            });
+        }
+
+        // Next game countdown
+        this.startNextGameCountdown(10);
     }
 }

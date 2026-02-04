@@ -5,17 +5,18 @@ class GameManager {
         this.io = io;
         this.solanaService = new SolanaService();
 
-        // Game configuration
-        this.maxPlayers = parseInt(process.env.MAX_PLAYERS) || 10;
+        // Game configuration - Updated for 20-25 players
+        this.maxPlayers = parseInt(process.env.MAX_PLAYERS) || 25;
         this.lobbyTimerSeconds = parseInt(process.env.LOBBY_TIMER_SECONDS) || 180;
         this.gameDurationSeconds = parseInt(process.env.GAME_DURATION_SECONDS) || 120;
-        this.totalPennies = parseInt(process.env.TOTAL_PENNIES) || 75;
+        this.totalPennies = parseInt(process.env.TOTAL_PENNIES) || 150; // More pennies for bigger map
+        this.mapSize = 200; // Bigger map for more players
 
         // State
         this.lobby = new Map(); // socketId -> { walletAddress, joinTime }
         this.players = new Map(); // socketId -> { walletAddress, position, score }
         this.spectators = new Set();
-        this.cooldownPlayers = new Set(); // walletAddresses on cooldown
+        // REMOVED: cooldownPlayers - no more skip/wait mechanic
         this.pennies = new Map(); // pennyId -> { position, collected }
 
         this.gamePhase = 'lobby'; // lobby, playing, results
@@ -23,20 +24,16 @@ class GameManager {
         this.gameTimer = null;
         this.lobbyStartTime = null;
         this.gameStartTime = null;
-        this.lastGamePlayers = [];
     }
 
-    // Add player to lobby
+    // Add player to lobby - REMOVED cooldown check
     addPlayerToLobby(socketId, walletAddress) {
         // Check if wallet is valid
         if (!walletAddress || walletAddress.length < 32) {
             return { success: false, reason: 'Invalid wallet address' };
         }
 
-        // Check cooldown
-        if (this.cooldownPlayers.has(walletAddress)) {
-            return { success: false, reason: 'You must wait one game before playing again. You can spectate!' };
-        }
+        // REMOVED: cooldown check - players can play immediately again
 
         // Check if already in lobby
         for (const [, player] of this.lobby) {
@@ -151,20 +148,18 @@ class GameManager {
         }, 1000);
     }
 
-    // Generate pennies in the world
+    // Generate pennies in the world - Updated for bigger map
     generatePennies() {
         this.pennies.clear();
 
-        // Penny spawn positions (spread around the map)
-        const mapSize = 100;
-
+        // Penny spawn positions (spread around the bigger map)
         for (let i = 0; i < this.totalPennies; i++) {
             const id = `penny_${i}`;
             this.pennies.set(id, {
                 position: {
-                    x: (Math.random() - 0.5) * mapSize,
+                    x: (Math.random() - 0.5) * this.mapSize,
                     y: 0.1, // Slightly above ground
-                    z: (Math.random() - 0.5) * mapSize
+                    z: (Math.random() - 0.5) * this.mapSize
                 },
                 collected: false
             });
@@ -206,7 +201,7 @@ class GameManager {
         return { success: true, playerScore: player.score };
     }
 
-    // End the game
+    // End the game - Updated with proportional reward system
     endGame() {
         if (this.gameTimer) {
             clearInterval(this.gameTimer);
@@ -224,27 +219,36 @@ class GameManager {
             }))
             .sort((a, b) => b.score - a.score);
 
-        const winners = rankings.slice(0, 3);
+        // Get top 3 (or less if fewer players)
+        const winners = rankings.slice(0, Math.min(3, rankings.length));
+        
+        // Calculate proportional rewards based on coins collected
+        const top3TotalCoins = winners.reduce((sum, w) => sum + w.score, 0);
+        
+        // Calculate reward percentages proportionally
+        const winnersWithRewards = winners.map((w, i) => {
+            // If no coins collected by top 3, distribute equally
+            const rewardPercent = top3TotalCoins > 0 
+                ? Math.round((w.score / top3TotalCoins) * 100)
+                : Math.round(100 / winners.length);
+            return {
+                ...w,
+                place: i + 1,
+                rewardPercent
+            };
+        });
 
-        // Set cooldown for all players who played
-        this.lastGamePlayers = [];
-        for (const [, player] of this.players) {
-            this.cooldownPlayers.add(player.walletAddress);
-            this.lastGamePlayers.push(player.walletAddress);
-        }
+        // REMOVED: cooldown system - players can play again immediately
 
         // Emit results
         this.io.emit('game_end', {
             rankings,
-            winners: winners.map((w, i) => ({
-                ...w,
-                place: i + 1,
-                rewardPercent: i === 0 ? 50 : i === 1 ? 30 : 20
-            }))
+            winners: winnersWithRewards,
+            totalTop3Coins: top3TotalCoins
         });
 
-        // Distribute rewards (async)
-        this.distributeRewards(winners);
+        // Distribute rewards (async) - pass proportional percentages
+        this.distributeRewards(winners, top3TotalCoins);
 
         // Reset for next game after delay
         setTimeout(() => {
@@ -252,18 +256,34 @@ class GameManager {
         }, 10000); // 10 second delay before next game
     }
 
-    // Distribute Solana rewards
-    async distributeRewards(winners) {
+    // Distribute Solana rewards - Updated with proportional system
+    async distributeRewards(winners, totalTop3Coins) {
         try {
             console.log('\n🏆 Starting reward distribution...');
+            console.log(`📊 Total coins by top ${winners.length} players: ${totalTop3Coins}`);
 
-            // Actually distribute rewards via Solana
-            const result = await this.solanaService.distributeRewards(winners, [50, 30, 20]);
+            // Calculate proportional percentages
+            const rewardPercents = winners.map(w => {
+                if (totalTop3Coins > 0) {
+                    return (w.score / totalTop3Coins) * 100;
+                }
+                // If no coins, distribute equally among winners
+                return 100 / winners.length;
+            });
+
+            console.log('💰 Reward distribution:');
+            winners.forEach((w, i) => {
+                console.log(`   Place ${i + 1}: ${w.walletAddress.slice(0, 8)}... - ${w.score} coins = ${rewardPercents[i].toFixed(2)}%`);
+            });
+
+            // Actually distribute rewards via Solana with proportional percentages
+            const result = await this.solanaService.distributeRewards(winners, rewardPercents);
 
             // Emit results to clients
             this.io.emit('rewards_distributed', {
                 winners: result.results,
-                success: result.success
+                success: result.success,
+                proportional: true
             });
 
             if (result.success) {
@@ -281,15 +301,9 @@ class GameManager {
         }
     }
 
-    // Reset for next game
+    // Reset for next game - REMOVED cooldown system
     resetGame() {
-        // Clear cooldown from previous previous game
-        this.cooldownPlayers.clear();
-
-        // Add last game players to cooldown
-        for (const wallet of this.lastGamePlayers) {
-            this.cooldownPlayers.add(wallet);
-        }
+        // REMOVED: cooldown system - players can play again immediately
 
         this.players.clear();
         this.pennies.clear();
@@ -297,8 +311,8 @@ class GameManager {
         this.spectators.clear();
 
         this.io.emit('game_reset', {
-            message: 'New game starting! Enter your wallet to join.',
-            cooldownPlayers: this.lastGamePlayers.map(w => w.slice(0, 6) + '...')
+            message: 'New game starting! Enter your wallet to join.'
+            // REMOVED: cooldownPlayers - no more skip mechanic
         });
     }
 

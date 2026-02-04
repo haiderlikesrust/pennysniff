@@ -26,8 +26,9 @@ export class World {
     }
 
     private createGround(): void {
-        // Sandy/desert ground typical of Israel
-        const groundGeometry = new THREE.PlaneGeometry(200, 200, 50, 50);
+        // Sandy/desert ground typical of Israel - BIGGER MAP for 20-25 players
+        const mapSize = 400; // Doubled from 200
+        const groundGeometry = new THREE.PlaneGeometry(mapSize, mapSize, 100, 100);
         const groundMaterial = new THREE.MeshStandardMaterial({
             color: 0xD2B48C,
             roughness: 0.95
@@ -37,8 +38,8 @@ export class World {
         ground.receiveShadow = true;
         this.scene.add(ground);
 
-        // Add some rocky patches
-        for (let i = 0; i < 40; i++) {
+        // Add more rocky patches for bigger map
+        for (let i = 0; i < 80; i++) {
             const rockGeometry = new THREE.DodecahedronGeometry(0.2 + Math.random() * 0.4, 0);
             const rockMaterial = new THREE.MeshStandardMaterial({
                 color: Math.random() > 0.5 ? 0xA0826D : 0x8B7355,
@@ -46,9 +47,9 @@ export class World {
             });
             const rock = new THREE.Mesh(rockGeometry, rockMaterial);
             rock.position.set(
-                (Math.random() - 0.5) * 180,
+                (Math.random() - 0.5) * (mapSize - 20),
                 0.15,
-                (Math.random() - 0.5) * 180
+                (Math.random() - 0.5) * (mapSize - 20)
             );
             rock.scale.y = 0.5;
             rock.receiveShadow = true;
@@ -56,19 +57,20 @@ export class World {
             this.scene.add(rock);
         }
 
-        // Add some sand dunes
-        for (let i = 0; i < 8; i++) {
+        // Add more sand dunes for bigger map
+        for (let i = 0; i < 16; i++) {
             const duneGeometry = new THREE.SphereGeometry(3 + Math.random() * 4, 16, 8, 0, Math.PI * 2, 0, Math.PI / 2);
             const duneMaterial = new THREE.MeshStandardMaterial({
                 color: 0xC4A574,
                 roughness: 1
             });
             const dune = new THREE.Mesh(duneGeometry, duneMaterial);
-            const angle = (i / 8) * Math.PI * 2;
+            const angle = (i / 16) * Math.PI * 2;
+            const radius = 100 + Math.random() * 60;
             dune.position.set(
-                Math.cos(angle) * 70 + (Math.random() - 0.5) * 20,
+                Math.cos(angle) * radius + (Math.random() - 0.5) * 30,
                 0,
-                Math.sin(angle) * 70 + (Math.random() - 0.5) * 20
+                Math.sin(angle) * radius + (Math.random() - 0.5) * 30
             );
             dune.scale.y = 0.3;
             dune.receiveShadow = true;
@@ -77,15 +79,15 @@ export class World {
     }
 
     private createStreets(): void {
-        // Cobblestone streets - typical of Jerusalem
+        // Cobblestone streets - typical of Jerusalem - BIGGER for larger map
         const streetMaterial = new THREE.MeshStandardMaterial({
             color: 0x8B8378,
             roughness: 0.8
         });
 
-        // Main street
+        // Main street (longer for bigger map)
         const street1 = new THREE.Mesh(
-            new THREE.PlaneGeometry(200, 10),
+            new THREE.PlaneGeometry(400, 10),
             streetMaterial
         );
         street1.rotation.x = -Math.PI / 2;
@@ -93,9 +95,9 @@ export class World {
         street1.receiveShadow = true;
         this.scene.add(street1);
 
-        // Cross street
+        // Cross street (longer for bigger map)
         const street2 = new THREE.Mesh(
-            new THREE.PlaneGeometry(10, 200),
+            new THREE.PlaneGeometry(10, 400),
             streetMaterial
         );
         street2.rotation.x = -Math.PI / 2;
@@ -103,8 +105,8 @@ export class World {
         street2.receiveShadow = true;
         this.scene.add(street2);
 
-        // Add cobblestone pattern texture effect
-        for (let i = -95; i < 96; i += 2) {
+        // Add cobblestone pattern texture effect (extended for bigger streets)
+        for (let i = -195; i < 196; i += 2) {
             for (let j = -4; j < 5; j += 2) {
                 if (Math.random() > 0.7) {
                     const stone = new THREE.Mesh(
@@ -123,7 +125,9 @@ export class World {
     }
 
     private createIsraeliBuildings(): void {
+        // More buildings spread across the bigger map
         const buildingPositions = [
+            // Original positions
             { x: 30, z: 30 },
             { x: -30, z: 30 },
             { x: 30, z: -30 },
@@ -135,7 +139,29 @@ export class World {
             { x: 15, z: 45 },
             { x: -15, z: 45 },
             { x: 15, z: -45 },
-            { x: -15, z: -45 }
+            { x: -15, z: -45 },
+            // New buildings for bigger map
+            { x: 80, z: 30 },
+            { x: -80, z: 30 },
+            { x: 80, z: -30 },
+            { x: -80, z: -30 },
+            { x: 30, z: 80 },
+            { x: -30, z: 80 },
+            { x: 30, z: -80 },
+            { x: -30, z: -80 },
+            { x: 100, z: 60 },
+            { x: -100, z: 60 },
+            { x: 100, z: -60 },
+            { x: -100, z: -60 },
+            { x: 60, z: 100 },
+            { x: -60, z: 100 },
+            { x: 60, z: -100 },
+            { x: -60, z: -100 },
+            // Even more outer buildings
+            { x: 120, z: 0 },
+            { x: -120, z: 0 },
+            { x: 0, z: 120 },
+            { x: 0, z: -120 },
         ];
 
         const stoneColors = [0xF5DEB3, 0xE8D4A8, 0xDCC9A3, 0xCFBF9E];

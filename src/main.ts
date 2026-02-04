@@ -41,6 +41,16 @@ class PennySnifferGame {
   private otherPlayers: Map<string, THREE.Group> = new Map();
   private playerWallets: Map<string, string> = new Map();
 
+  // Audio
+  private audioContext: AudioContext | null = null;
+  private coinSound: AudioBuffer | null = null;
+
+  // Voice Chat
+  private localStream: MediaStream | null = null;
+  private peerConnections: Map<string, RTCPeerConnection> = new Map();
+  private isInVoiceChat: boolean = false;
+  private isMuted: boolean = false;
+
   constructor() {
     this.socket = io(SERVER_URL);
     this.scene = new THREE.Scene();
@@ -79,12 +89,243 @@ class PennySnifferGame {
     // Setup UI events
     this.setupUIEvents();
 
+    // Setup audio
+    this.setupAudio();
+
+    // Setup voice chat events
+    this.setupVoiceChatEvents();
+
     // Handle window resize
     window.addEventListener('resize', () => this.onWindowResize());
 
     // Start animation loop (but don't render game yet)
     this.animate();
   }
+
+  private async setupAudio(): Promise<void> {
+    try {
+      this.audioContext = new AudioContext();
+      
+      // Create coin collection sound programmatically
+      const sampleRate = this.audioContext.sampleRate;
+      const duration = 0.3;
+      const buffer = this.audioContext.createBuffer(1, sampleRate * duration, sampleRate);
+      const data = buffer.getChannelData(0);
+      
+      // Generate a pleasant "ding" sound
+      for (let i = 0; i < buffer.length; i++) {
+        const t = i / sampleRate;
+        // Multiple harmonics for a rich coin sound
+        const freq1 = 880; // A5
+        const freq2 = 1320; // E6
+        const freq3 = 1760; // A6
+        
+        const envelope = Math.exp(-t * 10); // Quick decay
+        data[i] = envelope * (
+          0.5 * Math.sin(2 * Math.PI * freq1 * t) +
+          0.3 * Math.sin(2 * Math.PI * freq2 * t) +
+          0.2 * Math.sin(2 * Math.PI * freq3 * t)
+        );
+      }
+      
+      this.coinSound = buffer;
+      console.log('🔊 Audio system initialized');
+    } catch (error) {
+      console.error('Failed to initialize audio:', error);
+    }
+  }
+
+  private playCoinSound(): void {
+    if (!this.audioContext || !this.coinSound) return;
+    
+    // Resume audio context if suspended (browser autoplay policy)
+    if (this.audioContext.state === 'suspended') {
+      this.audioContext.resume();
+    }
+    
+    const source = this.audioContext.createBufferSource();
+    source.buffer = this.coinSound;
+    
+    const gainNode = this.audioContext.createGain();
+    gainNode.gain.value = 0.3; // Volume
+    
+    source.connect(gainNode);
+    gainNode.connect(this.audioContext.destination);
+    source.start();
+  }
+
+  // ============ VOICE CHAT METHODS ============
+  
+  private setupVoiceChatEvents(): void {
+    // Receive list of existing voice peers when joining
+    this.socket.on('voice_peers_list', async (data: { peers: string[] }) => {
+      console.log('🎤 Existing voice peers:', data.peers);
+      for (const peerId of data.peers) {
+        await this.createPeerConnection(peerId, true);
+      }
+    });
+
+    // New peer joined voice
+    this.socket.on('voice_peer_joined', async (data: { peerId: string }) => {
+      console.log('🎤 New voice peer:', data.peerId);
+      if (this.isInVoiceChat) {
+        await this.createPeerConnection(data.peerId, false);
+      }
+    });
+
+    // Peer left voice
+    this.socket.on('voice_peer_left', (data: { peerId: string }) => {
+      console.log('🔇 Voice peer left:', data.peerId);
+      this.closePeerConnection(data.peerId);
+    });
+
+    // Receive WebRTC offer
+    this.socket.on('voice_offer', async (data: { fromId: string; offer: RTCSessionDescriptionInit }) => {
+      console.log('📞 Received voice offer from:', data.fromId);
+      const pc = this.peerConnections.get(data.fromId) || await this.createPeerConnection(data.fromId, false);
+      await pc.setRemoteDescription(new RTCSessionDescription(data.offer));
+      const answer = await pc.createAnswer();
+      await pc.setLocalDescription(answer);
+      this.socket.emit('voice_answer', { targetId: data.fromId, answer });
+    });
+
+    // Receive WebRTC answer
+    this.socket.on('voice_answer', async (data: { fromId: string; answer: RTCSessionDescriptionInit }) => {
+      console.log('📞 Received voice answer from:', data.fromId);
+      const pc = this.peerConnections.get(data.fromId);
+      if (pc) {
+        await pc.setRemoteDescription(new RTCSessionDescription(data.answer));
+      }
+    });
+
+    // Receive ICE candidate
+    this.socket.on('voice_ice_candidate', async (data: { fromId: string; candidate: RTCIceCandidateInit }) => {
+      const pc = this.peerConnections.get(data.fromId);
+      if (pc && data.candidate) {
+        await pc.addIceCandidate(new RTCIceCandidate(data.candidate));
+      }
+    });
+
+    // Peer muted/unmuted
+    this.socket.on('voice_peer_muted', (data: { peerId: string; muted: boolean }) => {
+      this.ui.updateVoicePeerMuted(data.peerId, data.muted);
+    });
+  }
+
+  private async createPeerConnection(peerId: string, initiator: boolean): Promise<RTCPeerConnection> {
+    const config: RTCConfiguration = {
+      iceServers: [
+        { urls: 'stun:stun.l.google.com:19302' },
+        { urls: 'stun:stun1.l.google.com:19302' }
+      ]
+    };
+
+    const pc = new RTCPeerConnection(config);
+    this.peerConnections.set(peerId, pc);
+
+    // Add local stream tracks
+    if (this.localStream) {
+      this.localStream.getTracks().forEach(track => {
+        pc.addTrack(track, this.localStream!);
+      });
+    }
+
+    // Handle incoming audio
+    pc.ontrack = (event) => {
+      console.log('🔊 Received audio track from:', peerId);
+      const audio = new Audio();
+      audio.srcObject = event.streams[0];
+      audio.autoplay = true;
+      audio.id = `voice-audio-${peerId}`;
+      document.body.appendChild(audio);
+    };
+
+    // Handle ICE candidates
+    pc.onicecandidate = (event) => {
+      if (event.candidate) {
+        this.socket.emit('voice_ice_candidate', {
+          targetId: peerId,
+          candidate: event.candidate
+        });
+      }
+    };
+
+    // Handle connection state
+    pc.onconnectionstatechange = () => {
+      console.log(`Voice connection to ${peerId}: ${pc.connectionState}`);
+      if (pc.connectionState === 'failed' || pc.connectionState === 'disconnected') {
+        this.closePeerConnection(peerId);
+      }
+    };
+
+    // If initiator, create and send offer
+    if (initiator) {
+      const offer = await pc.createOffer();
+      await pc.setLocalDescription(offer);
+      this.socket.emit('voice_offer', { targetId: peerId, offer });
+    }
+
+    return pc;
+  }
+
+  private closePeerConnection(peerId: string): void {
+    const pc = this.peerConnections.get(peerId);
+    if (pc) {
+      pc.close();
+      this.peerConnections.delete(peerId);
+    }
+    
+    // Remove audio element
+    const audioEl = document.getElementById(`voice-audio-${peerId}`);
+    if (audioEl) {
+      audioEl.remove();
+    }
+  }
+
+  async joinVoiceChat(): Promise<void> {
+    try {
+      this.localStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+      this.isInVoiceChat = true;
+      this.socket.emit('voice_join');
+      this.ui.updateVoiceStatus(true, false);
+      console.log('🎤 Joined voice chat');
+    } catch (error) {
+      console.error('Failed to join voice chat:', error);
+      this.ui.showMessage('Failed to access microphone', 'error');
+    }
+  }
+
+  leaveVoiceChat(): void {
+    // Stop local stream
+    if (this.localStream) {
+      this.localStream.getTracks().forEach(track => track.stop());
+      this.localStream = null;
+    }
+
+    // Close all peer connections
+    this.peerConnections.forEach((_, peerId) => {
+      this.closePeerConnection(peerId);
+    });
+
+    this.isInVoiceChat = false;
+    this.socket.emit('voice_leave');
+    this.ui.updateVoiceStatus(false, false);
+    console.log('🔇 Left voice chat');
+  }
+
+  toggleMute(): void {
+    if (!this.localStream) return;
+    
+    this.isMuted = !this.isMuted;
+    this.localStream.getAudioTracks().forEach(track => {
+      track.enabled = !this.isMuted;
+    });
+    
+    this.socket.emit('voice_mute_toggle', { muted: this.isMuted });
+    this.ui.updateVoiceStatus(true, this.isMuted);
+  }
+
+  // ============ END VOICE CHAT ============
 
   private setupLighting(): void {
     // Ambient light
@@ -265,6 +506,8 @@ class PennySnifferGame {
       if (data.playerId === this.playerId) {
         this.myScore = data.playerScore;
         this.ui.updateScore(this.myScore);
+        // Play coin collection sound
+        this.playCoinSound();
       }
     });
 
@@ -278,6 +521,10 @@ class PennySnifferGame {
 
     this.socket.on('game_end', (data: any) => {
       this.endGame(data);
+      // Leave voice chat when game ends
+      if (this.isInVoiceChat) {
+        this.leaveVoiceChat();
+      }
     });
 
     this.socket.on('game_reset', (data: any) => {
@@ -294,6 +541,8 @@ class PennySnifferGame {
     const spectateBtn = document.getElementById('spectate-btn');
     const walletInput = document.getElementById('wallet-input') as HTMLInputElement;
     const playAgainBtn = document.getElementById('play-again-btn');
+    const voiceBtn = document.getElementById('voice-btn');
+    const muteBtn = document.getElementById('mute-btn');
 
     if (joinBtn) {
       joinBtn.addEventListener('click', () => {
@@ -316,6 +565,23 @@ class PennySnifferGame {
     if (playAgainBtn) {
       playAgainBtn.addEventListener('click', () => {
         this.ui.showScreen('lobby');
+      });
+    }
+
+    // Voice chat buttons
+    if (voiceBtn) {
+      voiceBtn.addEventListener('click', () => {
+        if (this.isInVoiceChat) {
+          this.leaveVoiceChat();
+        } else {
+          this.joinVoiceChat();
+        }
+      });
+    }
+
+    if (muteBtn) {
+      muteBtn.addEventListener('click', () => {
+        this.toggleMute();
       });
     }
   }
@@ -600,18 +866,15 @@ class PennySnifferGame {
     this.isPlaying = false;
     document.exitPointerLock();
 
-    // Show results
-    this.ui.showResults(data.rankings, data.winners);
+    // Show results with proportional rewards
+    if (data.totalTop3Coins !== undefined) {
+      this.ui.showResultsWithProportional(data.rankings, data.winners, data.totalTop3Coins);
+    } else {
+      this.ui.showResults(data.rankings, data.winners);
+    }
     this.ui.showScreen('results');
 
-    // Check if player is on cooldown
-    const participated = data.rankings.some((r: any) =>
-      r.walletAddress === this.walletAddress
-    );
-
-    if (participated) {
-      this.ui.showCooldownMessage('You must wait one game before playing again.');
-    }
+    // REMOVED: cooldown message - players can play again immediately
   }
 
   private resetGame(_data: any): void {
@@ -685,8 +948,8 @@ class PennySnifferGame {
       this.canJump = true;
     }
 
-    // Keep player in bounds
-    const bounds = 55;
+    // Keep player in bounds - Updated for bigger map
+    const bounds = 190; // Increased from 55 for 400x400 map
     this.camera.position.x = Math.max(-bounds, Math.min(bounds, this.camera.position.x));
     this.camera.position.z = Math.max(-bounds, Math.min(bounds, this.camera.position.z));
 
@@ -707,14 +970,14 @@ class PennySnifferGame {
     this.checkPennyCollection();
   }
 
-  // Building collision detection
+  // Building collision detection - Updated for bigger map
   private checkBuildingCollision(): boolean {
     const playerPos = this.camera.position;
     const playerRadius = 0.5; // Player collision radius
 
     // Building positions and sizes (must match world.ts)
     const buildings = [
-      // Israeli buildings
+      // Original Israeli buildings
       { x: 30, z: 30, w: 10, d: 8 },
       { x: -30, z: 30, w: 10, d: 8 },
       { x: 30, z: -30, w: 10, d: 8 },
@@ -727,6 +990,27 @@ class PennySnifferGame {
       { x: -15, z: 45, w: 10, d: 8 },
       { x: 15, z: -45, w: 10, d: 8 },
       { x: -15, z: -45, w: 10, d: 8 },
+      // New buildings for bigger map
+      { x: 80, z: 30, w: 10, d: 8 },
+      { x: -80, z: 30, w: 10, d: 8 },
+      { x: 80, z: -30, w: 10, d: 8 },
+      { x: -80, z: -30, w: 10, d: 8 },
+      { x: 30, z: 80, w: 10, d: 8 },
+      { x: -30, z: 80, w: 10, d: 8 },
+      { x: 30, z: -80, w: 10, d: 8 },
+      { x: -30, z: -80, w: 10, d: 8 },
+      { x: 100, z: 60, w: 10, d: 8 },
+      { x: -100, z: 60, w: 10, d: 8 },
+      { x: 100, z: -60, w: 10, d: 8 },
+      { x: -100, z: -60, w: 10, d: 8 },
+      { x: 60, z: 100, w: 10, d: 8 },
+      { x: -60, z: 100, w: 10, d: 8 },
+      { x: 60, z: -100, w: 10, d: 8 },
+      { x: -60, z: -100, w: 10, d: 8 },
+      { x: 120, z: 0, w: 10, d: 8 },
+      { x: -120, z: 0, w: 10, d: 8 },
+      { x: 0, z: 120, w: 10, d: 8 },
+      { x: 0, z: -120, w: 10, d: 8 },
       // Synagogue
       { x: 0, z: -40, w: 18, d: 15 },
       // Western Wall

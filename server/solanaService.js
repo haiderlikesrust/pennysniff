@@ -160,8 +160,8 @@ class SolanaService {
         }
     }
 
-    // Distribute rewards to top 3 players
-    async distributeRewards(winners, rewardPercents = [50, 30, 20]) {
+    // Distribute rewards to top players (supports 1-3 winners with proportional rewards)
+    async distributeRewards(winners, rewardPercents) {
         const results = [];
 
         // Get pool info first
@@ -170,28 +170,38 @@ class SolanaService {
         console.log(`   Pool Total: ${poolInfo.total.toFixed(4)} SOL`);
         console.log(`   Fee Reserve: ${poolInfo.feeReserve} SOL`);
         console.log(`   Distributable: ${poolInfo.distributable.toFixed(4)} SOL`);
+        console.log(`   Winners: ${winners.length}`);
 
         if (poolInfo.distributable <= 0) {
             console.log('❌ No funds available for distribution');
             return { success: false, results: [], error: 'Insufficient funds' };
         }
 
-        for (let i = 0; i < winners.length && i < 3; i++) {
-            const winner = winners[i];
-            const percent = rewardPercents[i];
+        // Handle any number of winners (1, 2, or 3)
+        const numWinners = Math.min(winners.length, 3);
+        
+        // Normalize percentages to ensure they sum to 100%
+        const totalPercent = rewardPercents.slice(0, numWinners).reduce((a, b) => a + b, 0);
+        const normalizedPercents = rewardPercents.slice(0, numWinners).map(p => (p / totalPercent) * 100);
 
-            console.log(`\n🎖️ Place ${i + 1}: ${winner.walletAddress.slice(0, 8)}... (${percent}%)`);
+        for (let i = 0; i < numWinners; i++) {
+            const winner = winners[i];
+            const percent = normalizedPercents[i];
+
+            console.log(`\n🎖️ Place ${i + 1}: ${winner.walletAddress.slice(0, 8)}... (${percent.toFixed(2)}% of pool)`);
+            console.log(`   Coins collected: ${winner.score}`);
 
             const result = await this.sendReward(winner.walletAddress, percent);
             results.push({
                 place: i + 1,
                 wallet: winner.walletAddress,
                 percent: percent,
+                coins: winner.score,
                 ...result
             });
 
             // Small delay between transactions to avoid rate limits
-            if (i < winners.length - 1) {
+            if (i < numWinners - 1) {
                 await new Promise(resolve => setTimeout(resolve, 1000));
             }
         }
