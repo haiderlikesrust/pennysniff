@@ -18,7 +18,7 @@ class PennySnifferGame {
   private ui: UI;
 
   private playerId: string = '';
-  private walletAddress: string = '';
+  private _walletAddress: string = ''; // Stored for potential future use
   private isPlaying: boolean = false;
   private isSpectating: boolean = false;
 
@@ -548,7 +548,7 @@ class PennySnifferGame {
       joinBtn.addEventListener('click', () => {
         const wallet = walletInput?.value.trim();
         if (wallet && wallet.length >= 32) {
-          this.walletAddress = wallet;
+          this._walletAddress = wallet;
           this.socket.emit('join_lobby', { walletAddress: wallet });
         } else {
           this.ui.showMessage('Please enter a valid Solana wallet address', 'error');

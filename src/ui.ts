@@ -3,14 +3,12 @@ export class UI {
     private gameScreen: HTMLElement | null;
     private resultsScreen: HTMLElement | null;
     private loadingScreen: HTMLElement | null;
-    private voiceIndicator: HTMLElement | null;
 
     constructor() {
         this.lobbyScreen = document.getElementById('lobby-screen');
         this.gameScreen = document.getElementById('game-screen');
         this.resultsScreen = document.getElementById('results-screen');
         this.loadingScreen = document.getElementById('loading-screen');
-        this.voiceIndicator = document.getElementById('voice-indicator');
     }
 
     showScreen(screen: 'lobby' | 'game' | 'results' | 'loading'): void {
