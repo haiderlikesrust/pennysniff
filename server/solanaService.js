@@ -26,13 +26,40 @@ class SolanaService {
             // Load reward wallet if private key exists
             let privateKey = process.env.REWARD_WALLET_PRIVATE_KEY;
 
+            // Debug: Log raw private key info
+            console.log('\n🔑 ═══════════════════════════════════════');
+            console.log('🔑 PRIVATE KEY DEBUG INFO');
+            console.log('🔑 ═══════════════════════════════════════');
+            console.log('   Raw value exists:', !!privateKey);
+            console.log('   Raw value type:', typeof privateKey);
+            console.log('   Raw value length:', privateKey ? privateKey.length : 0);
+            console.log('   Raw value (first 20 chars):', privateKey ? privateKey.substring(0, 20) + '...' : 'N/A');
+            console.log('   Raw value (last 10 chars):', privateKey ? '...' + privateKey.substring(privateKey.length - 10) : 'N/A');
+            console.log('   Starts with "[":', privateKey ? privateKey.startsWith('[') : false);
+            console.log('   Contains quotes:', privateKey ? (privateKey.includes('"') || privateKey.includes("'")) : false);
+            console.log('🔑 ═══════════════════════════════════════\n');
+
             if (privateKey && privateKey !== 'your_wallet_private_key_here') {
                 // Remove whitespace/newlines which usually cause decode errors
                 privateKey = privateKey.trim();
+                
+                // Remove surrounding quotes if present (common .env issue)
+                if ((privateKey.startsWith('"') && privateKey.endsWith('"')) ||
+                    (privateKey.startsWith("'") && privateKey.endsWith("'"))) {
+                    console.log('⚠️ Removing surrounding quotes from private key');
+                    privateKey = privateKey.slice(1, -1);
+                }
+
+                console.log('   After trim/cleanup length:', privateKey.length);
+                console.log('   After cleanup (first 20 chars):', privateKey.substring(0, 20) + '...');
 
                 try {
                     // Try base58 decode first
                     const bs58 = require('bs58');
+                    console.log('   bs58 module type:', typeof bs58);
+                    console.log('   bs58.decode type:', typeof bs58.decode);
+                    console.log('   bs58.default?.decode type:', typeof bs58.default?.decode);
+                    
                     // Handle potential ESM/CommonJS import mismatch for bs58 v6+
                     const decode = bs58.decode || bs58.default?.decode || bs58;
 
@@ -41,6 +68,8 @@ class SolanaService {
                     }
 
                     const secretKey = decode(privateKey);
+                    console.log('   Decoded secret key length:', secretKey.length, '(expected: 64)');
+                    
                     this.rewardWallet = Keypair.fromSecretKey(secretKey);
 
                     console.log('💰 Reward wallet loaded successfully!');
