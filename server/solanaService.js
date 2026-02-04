@@ -11,7 +11,7 @@ class SolanaService {
 
         // Fee configuration (in SOL)
         this.feeReserve = parseFloat(process.env.FEE_RESERVE_SOL) || 0.01;
-        
+
         // Total reward pool per game (in SOL) - configurable via env
         this.rewardPoolPerGame = parseFloat(process.env.REWARD_POOL_PER_GAME) || 0.05;
 
@@ -24,31 +24,51 @@ class SolanaService {
             console.log('🌐 Connected to Solana RPC:', this.rpcUrl.includes('helius') ? 'Helius RPC' : 'Public RPC');
 
             // Load reward wallet if private key exists
-            const privateKey = process.env.REWARD_WALLET_PRIVATE_KEY;
+            let privateKey = process.env.REWARD_WALLET_PRIVATE_KEY;
+
             if (privateKey && privateKey !== 'your_wallet_private_key_here') {
+                // Remove whitespace/newlines which usually cause decode errors
+                privateKey = privateKey.trim();
+
                 try {
                     // Try base58 decode first
                     const bs58 = require('bs58');
-                    const secretKey = bs58.decode(privateKey);
+                    // Handle potential ESM/CommonJS import mismatch for bs58 v6+
+                    const decode = bs58.decode || bs58.default?.decode || bs58;
+
+                    if (typeof decode !== 'function') {
+                        throw new Error(`bs58.decode is not a function. Got: ${typeof decode}`);
+                    }
+
+                    const secretKey = decode(privateKey);
                     this.rewardWallet = Keypair.fromSecretKey(secretKey);
-                    console.log('💰 Reward wallet loaded:', this.rewardWallet.publicKey.toString());
-                    
+
+                    console.log('💰 Reward wallet loaded successfully!');
+                    console.log('   Public Key:', this.rewardWallet.publicKey.toString());
+
                     // Check balance on startup
                     this.getBalance(this.rewardWallet.publicKey.toString()).then(balance => {
-                        console.log(`💰 Reward wallet balance: ${balance.toFixed(4)} SOL`);
+                        console.log(`   Balance: ${balance.toFixed(4)} SOL`);
                         if (balance < this.rewardPoolPerGame + this.feeReserve) {
-                            console.warn(`⚠️ Warning: Low balance! Need at least ${(this.rewardPoolPerGame + this.feeReserve).toFixed(4)} SOL for rewards + fees`);
+                            console.warn(`⚠️ Warning: Low balance! Need at least ${(this.rewardPoolPerGame + this.feeReserve).toFixed(4)} SOL`);
                         }
                     });
+
                 } catch (e) {
+                    // Log the base58 error to help debug
+                    console.warn(`⚠️ Base58 decode failed: ${e.message}. Trying JSON format...`);
+
                     // Try JSON array format
                     try {
                         const secretKeyArray = JSON.parse(privateKey);
                         this.rewardWallet = Keypair.fromSecretKey(Uint8Array.from(secretKeyArray));
-                        console.log('💰 Reward wallet loaded:', this.rewardWallet.publicKey.toString());
+                        console.log('💰 Reward wallet loaded (JSON format):', this.rewardWallet.publicKey.toString());
                     } catch (e2) {
-                        console.error('❌ Failed to load reward wallet - invalid private key format');
-                        console.error('   Expected: base58 encoded string OR JSON array of bytes');
+                        console.error('❌ Failed to load reward wallet');
+                        console.error('   Error 1 (Base58):', e.message);
+                        console.error('   Error 2 (JSON):', e2.message);
+                        console.error('   Key length:', privateKey.length);
+                        console.error('   First 5 chars:', privateKey.substring(0, 5));
                     }
                 }
             } else {
@@ -92,9 +112,9 @@ class SolanaService {
     async sendSOL(recipientAddress, amountSOL) {
         if (!this.rewardWallet) {
             console.log(`[SIMULATED] Would send ${amountSOL.toFixed(6)} SOL to ${recipientAddress}`);
-            return { 
-                success: true, 
-                simulated: true, 
+            return {
+                success: true,
+                simulated: true,
                 amount: amountSOL,
                 signature: 'SIMULATED_' + Date.now(),
                 txUrl: null
@@ -192,19 +212,19 @@ class SolanaService {
         const totalNeeded = this.rewardPoolPerGame + this.feeReserve;
         if (balance < totalNeeded && this.rewardWallet) {
             console.error(`❌ Insufficient balance! Have: ${balance.toFixed(4)} SOL, Need: ${totalNeeded.toFixed(4)} SOL`);
-            return { 
-                success: false, 
-                results: [], 
-                error: `Insufficient balance. Need ${totalNeeded.toFixed(4)} SOL but only have ${balance.toFixed(4)} SOL` 
+            return {
+                success: false,
+                results: [],
+                error: `Insufficient balance. Need ${totalNeeded.toFixed(4)} SOL but only have ${balance.toFixed(4)} SOL`
             };
         }
 
         // Normalize percentages to ensure they sum to 100%
         const numWinners = Math.min(winners.length, 3);
         const totalPercent = rewardPercents.slice(0, numWinners).reduce((a, b) => a + b, 0);
-        
+
         console.log('\n📊 Reward Distribution:');
-        
+
         for (let i = 0; i < numWinners; i++) {
             const winner = winners[i];
             const rawPercent = rewardPercents[i];
@@ -217,7 +237,7 @@ class SolanaService {
             console.log(`   Amount: ${amountSOL.toFixed(6)} SOL`);
 
             const result = await this.sendSOL(winner.walletAddress, amountSOL);
-            
+
             results.push({
                 place: i + 1,
                 wallet: winner.walletAddress,
