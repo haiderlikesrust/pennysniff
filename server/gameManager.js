@@ -221,14 +221,14 @@ class GameManager {
 
         // Get top 3 (or less if fewer players)
         const winners = rankings.slice(0, Math.min(3, rankings.length));
-        
+
         // Calculate proportional rewards based on coins collected
         const top3TotalCoins = winners.reduce((sum, w) => sum + w.score, 0);
-        
+
         // Calculate reward percentages proportionally
         const winnersWithRewards = winners.map((w, i) => {
             // If no coins collected by top 3, distribute equally
-            const rewardPercent = top3TotalCoins > 0 
+            const rewardPercent = top3TotalCoins > 0
                 ? Math.round((w.score / top3TotalCoins) * 100)
                 : Math.round(100 / winners.length);
             return {
@@ -256,11 +256,13 @@ class GameManager {
         }, 10000); // 10 second delay before next game
     }
 
-    // Distribute Solana rewards - Updated with proportional system
+    // Distribute Solana rewards - Updated with proportional system and detailed logging
     async distributeRewards(winners, totalTop3Coins) {
         try {
-            console.log('\n🏆 Starting reward distribution...');
-            console.log(`📊 Total coins by top ${winners.length} players: ${totalTop3Coins}`);
+            console.log('\n🏆 === REWARD DISTRIBUTION STARTED ===');
+            console.log(`timestamp: ${new Date().toISOString()}`);
+            console.log(`winners count: ${winners.length}`);
+            console.log(`total top 3 coins: ${totalTop3Coins}`);
 
             // Calculate proportional percentages
             const rewardPercents = winners.map(w => {
@@ -271,13 +273,19 @@ class GameManager {
                 return 100 / winners.length;
             });
 
-            console.log('💰 Reward distribution:');
+            console.log('💰 Calculated Reward Split:');
             winners.forEach((w, i) => {
-                console.log(`   Place ${i + 1}: ${w.walletAddress.slice(0, 8)}... - ${w.score} coins = ${rewardPercents[i].toFixed(2)}%`);
+                console.log(`   #${i + 1} Wallet: ${w.walletAddress}`);
+                console.log(`      Score: ${w.score}`);
+                console.log(`      Share: ${rewardPercents[i].toFixed(4)}%`);
             });
 
             // Actually distribute rewards via Solana with proportional percentages
+            console.log('🔄 Calling SolanaService.distributeRewards...');
             const result = await this.solanaService.distributeRewards(winners, rewardPercents);
+
+            console.log('✅ SolanaService returned:');
+            console.log(JSON.stringify(result, null, 2));
 
             // Emit results to clients
             this.io.emit('rewards_distributed', {
@@ -287,12 +295,14 @@ class GameManager {
             });
 
             if (result.success) {
-                console.log('✅ Rewards distributed successfully!');
+                console.log('✅ REWARD DISTRIBUTION COMPLETED SUCCESSFULLY');
             } else {
-                console.log('⚠️ Some rewards may not have been distributed');
+                console.log('⚠️ REWARD DISTRIBUTION PARTIALLY FAILED OR SKIPPED');
+                if (result.error) console.error('Error details:', result.error);
             }
+            console.log('🏆 === REWARD DISTRIBUTION ENDED ===\n');
         } catch (error) {
-            console.error('Error distributing rewards:', error);
+            console.error('❌ CRITICAL ERROR IN DISTRIBUTE REWARDS:', error);
             this.io.emit('rewards_distributed', {
                 winners: [],
                 success: false,

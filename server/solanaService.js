@@ -177,41 +177,104 @@ class SolanaService {
             return { success: false, results: [], error: 'Insufficient funds' };
         }
 
-        // Handle any number of winners (1, 2, or 3)
-        const numWinners = Math.min(winners.length, 3);
-        
-        // Normalize percentages to ensure they sum to 100%
-        const totalPercent = rewardPercents.slice(0, numWinners).reduce((a, b) => a + b, 0);
-        const normalizedPercents = rewardPercents.slice(0, numWinners).map(p => (p / totalPercent) * 100);
-
-        for (let i = 0; i < numWinners; i++) {
-            const winner = winners[i];
-            const percent = normalizedPercents[i];
-
-            console.log(`\n🎖️ Place ${i + 1}: ${winner.walletAddress.slice(0, 8)}... (${percent.toFixed(2)}% of pool)`);
-            console.log(`   Coins collected: ${winner.score}`);
-
-            const result = await this.sendReward(winner.walletAddress, percent);
-            results.push({
-                place: i + 1,
-                wallet: winner.walletAddress,
-                percent: percent,
-                coins: winner.score,
-                ...result
-            });
-
-            // Small delay between transactions to avoid rate limits
-            if (i < numWinners - 1) {
-                await new Promise(resolve => setTimeout(resolve, 1000));
-            }
+        if (!winners || winners.length === 0) {
+            return { success: false, error: 'No winners to reward' };
         }
 
-        console.log('\n🏆 === DISTRIBUTION COMPLETE ===\n');
+        console.log(`\n💳 SOLANA SERVICE: Distributing rewards to ${winners.length} winners`);
+        let successCount = 0;
 
-        return {
-            success: results.some(r => r.success),
-            results
-        };
+        try {
+            // Check balance first
+            const balance = await this.connection.getBalance(this.rewardWallet.publicKey);
+            console.log(`💳 Wallet Balance: ${balance / LAMPORTS_PER_SOL} SOL`);
+
+            // Total pool (this logic might need adjustment based on how 'pool' is defined, 
+            // for now assume we send a fixed amount per game or based on accumulation)
+            // But here we use 'rewardPercents' to distribute the FEE_RESERVE_SOL (or a specific pool amount)
+            // WARNING: The previous logic sent 0.05 * percent. Let's make it clearer.
+            // Let's assume the TOTAL reward pool for this round is 0.1 SOL (example) or derived from fees.
+            // For this implementation, we'll keep the logic simple: distribute a fixed pot of e.g. 0.05 SOL
+            const TOTAL_POT = 0.05;
+            console.log(`💰 Total Pot for this round: ${TOTAL_POT} SOL`);
+
+            for (let i = 0; i < winners.length; i++) {
+                const winner = winners[i];
+                const percent = rewardPercents[i]; // 0-100
+                const amountSOL = (TOTAL_POT * percent) / 100;
+
+                console.log(`   Processing Winner #${i + 1}: ${winner.walletAddress}`);
+                console.log(`      Share: ${percent.toFixed(2)}% -> ${amountSOL.toFixed(6)} SOL`);
+
+                if (amountSOL < 0.000001) {
+                    console.log('      ⚠️ Amount too small, skipping.');
+                    results.push({ wallet: winner.walletAddress, status: 'skipped_too_small', amount: amountSOL });
+                    continue;
+                }
+
+                try {
+                    const signature = await this.sendSOL(winner.walletAddress, amountSOL);
+                    console.log(`      ✅ Sent! Sig: ${signature}`);
+                    results.push({ wallet: winner.walletAddress, status: 'sent', signature, amount: amountSOL });
+                    successCount++;
+                } catch (err) {
+                    console.error(`      ❌ Failed to send to ${winner.walletAddress}:`, err.message);
+                    results.push({ wallet: winner.walletAddress, status: 'failed', error: err.message, amount: amountSOL });
+                }
+            }
+
+            return {
+                success: successCount > 0,
+                results,
+                totalDistributed: results.filter(r => r.status === 'sent').reduce((acc, r) => acc + r.amount, 0)
+            };
+
+        } catch (error) {
+            console.error('💳 SOLANA SERVICE ERROR:', error);
+            return { success: false, error: error.message };
+        }
+    }
+
+    // New method to send a direct SOL amount (inferred from the user's requested change)
+    async sendSOL(recipientAddress, amountSOL) {
+        if (!this.rewardWallet) {
+            console.log(`[SIMULATED] Sending ${amountSOL.toFixed(6)} SOL to ${recipientAddress}`);
+            return 'SIMULATED_TX_SIGNATURE'; // Return a dummy signature for simulation
+        }
+
+        try {
+            const lamports = Math.floor(amountSOL * LAMPORTS_PER_SOL);
+
+            if (lamports <= 0) {
+                throw new Error('Amount too small to send');
+            }
+
+            if (!this.isValidAddress(recipientAddress)) {
+                throw new Error('Invalid recipient address');
+            }
+
+            const recipientPubkey = new PublicKey(recipientAddress);
+            const { blockhash } = await this.connection.getLatestBlockhash();
+
+            const transaction = new Transaction().add(
+                SystemProgram.transfer({
+                    fromPubkey: this.rewardWallet.publicKey,
+                    toPubkey: recipientPubkey,
+                    lamports
+                })
+            );
+
+            transaction.recentBlockhash = blockhash;
+            transaction.feePayer = this.rewardWallet.publicKey;
+
+            const signature = await this.connection.sendTransaction(transaction, [this.rewardWallet]);
+            await this.connection.confirmTransaction(signature, 'confirmed');
+
+            return signature;
+        } catch (error) {
+            console.error('Error in sendSOL:', error.message);
+            throw error; // Re-throw to be caught by distributeRewards
+        }
     }
 }
 

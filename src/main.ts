@@ -50,6 +50,10 @@ class PennySnifferGame {
   private isInVoiceChat: boolean = false;
   private isMuted: boolean = false;
 
+  // Network throttling
+  private lastUpdate: number = 0;
+  private updateInterval: number = 50; // Send updates every 50ms (20 times/sec) instead of every frame
+
   constructor() {
     this.socket = io(SERVER_URL);
     this.scene = new THREE.Scene();
@@ -60,6 +64,8 @@ class PennySnifferGame {
 
     this.init();
   }
+
+
 
   private init(): void {
     // Setup renderer
@@ -404,6 +410,16 @@ class PennySnifferGame {
         break;
       case 'KeyE':
         this.interactWithDoor();
+        break;
+      case 'KeyV':
+        if (this.isInVoiceChat) {
+          this.leaveVoiceChat();
+        } else {
+          this.joinVoiceChat();
+        }
+        break;
+      case 'KeyM':
+        if (this.isInVoiceChat) this.toggleMute();
         break;
     }
   }
@@ -951,18 +967,22 @@ class PennySnifferGame {
     this.camera.position.x = Math.max(-bounds, Math.min(bounds, this.camera.position.x));
     this.camera.position.z = Math.max(-bounds, Math.min(bounds, this.camera.position.z));
 
-    // Send position to server
-    this.socket.emit('player_move', {
-      position: {
-        x: this.camera.position.x,
-        y: this.camera.position.y,
-        z: this.camera.position.z
-      },
-      rotation: {
-        x: this.euler.x,
-        y: this.euler.y
-      }
-    });
+    // Send position to server (Throttled)
+    const now = Date.now();
+    if (now - this.lastUpdate > this.updateInterval) {
+      this.socket.emit('player_move', {
+        position: {
+          x: this.camera.position.x,
+          y: this.camera.position.y,
+          z: this.camera.position.z
+        },
+        rotation: {
+          x: this.euler.x,
+          y: this.euler.y
+        }
+      });
+      this.lastUpdate = now;
+    }
 
     // Check for penny collection
     this.checkPennyCollection();
