@@ -26,6 +26,7 @@ class PennySnifferGame {
   private moveBackward: boolean = false;
   private moveLeft: boolean = false;
   private moveRight: boolean = false;
+  private isSprinting: boolean = false;
   private canJump: boolean = true;
   private velocity: THREE.Vector3 = new THREE.Vector3();
   private direction: THREE.Vector3 = new THREE.Vector3();
@@ -111,26 +112,29 @@ class PennySnifferGame {
     try {
       this.audioContext = new AudioContext();
 
-      // Create coin collection sound programmatically
+      // Create a better coin collection sound - Mario-style coin
       const sampleRate = this.audioContext.sampleRate;
-      const duration = 0.3;
+      const duration = 0.15;
       const buffer = this.audioContext.createBuffer(1, sampleRate * duration, sampleRate);
       const data = buffer.getChannelData(0);
 
-      // Generate a pleasant "ding" sound
+      // Generate a classic "coin" sound with pitch bend
       for (let i = 0; i < buffer.length; i++) {
         const t = i / sampleRate;
-        // Multiple harmonics for a rich coin sound
-        const freq1 = 880; // A5
-        const freq2 = 1320; // E6
-        const freq3 = 1760; // A6
-
-        const envelope = Math.exp(-t * 10); // Quick decay
-        data[i] = envelope * (
-          0.5 * Math.sin(2 * Math.PI * freq1 * t) +
-          0.3 * Math.sin(2 * Math.PI * freq2 * t) +
-          0.2 * Math.sin(2 * Math.PI * freq3 * t)
-        );
+        
+        // Two-tone coin sound (like Mario)
+        const freq1 = 988; // B5
+        const freq2 = 1319; // E6
+        
+        // Switch frequency halfway through
+        const freq = t < 0.075 ? freq1 : freq2;
+        
+        // Sharp attack, quick decay
+        const envelope = t < 0.01 
+          ? t / 0.01 // Quick attack
+          : Math.exp(-(t - 0.01) * 15); // Decay
+        
+        data[i] = envelope * Math.sin(2 * Math.PI * freq * t) * 0.8;
       }
 
       this.coinSound = buffer;
@@ -152,11 +156,37 @@ class PennySnifferGame {
     source.buffer = this.coinSound;
 
     const gainNode = this.audioContext.createGain();
-    gainNode.gain.value = 0.3; // Volume
+    gainNode.gain.value = 0.4; // Volume
 
     source.connect(gainNode);
     gainNode.connect(this.audioContext.destination);
     source.start();
+  }
+
+  private playSpawnSound(): void {
+    if (!this.audioContext) return;
+
+    // Resume audio context if suspended
+    if (this.audioContext.state === 'suspended') {
+      this.audioContext.resume();
+    }
+
+    // Create a subtle "sparkle" sound for coin spawning
+    const oscillator = this.audioContext.createOscillator();
+    const gainNode = this.audioContext.createGain();
+
+    oscillator.type = 'sine';
+    oscillator.frequency.setValueAtTime(1200, this.audioContext.currentTime);
+    oscillator.frequency.exponentialRampToValueAtTime(600, this.audioContext.currentTime + 0.1);
+
+    gainNode.gain.setValueAtTime(0.1, this.audioContext.currentTime);
+    gainNode.gain.exponentialRampToValueAtTime(0.01, this.audioContext.currentTime + 0.1);
+
+    oscillator.connect(gainNode);
+    gainNode.connect(this.audioContext.destination);
+
+    oscillator.start();
+    oscillator.stop(this.audioContext.currentTime + 0.1);
   }
 
   // ============ VOICE CHAT METHODS ============
@@ -421,6 +451,10 @@ class PennySnifferGame {
       case 'KeyM':
         if (this.isInVoiceChat) this.toggleMute();
         break;
+      case 'ShiftLeft':
+      case 'ShiftRight':
+        this.isSprinting = true;
+        break;
     }
   }
 
@@ -457,6 +491,10 @@ class PennySnifferGame {
       case 'KeyD':
       case 'ArrowRight':
         this.moveRight = false;
+        break;
+      case 'ShiftLeft':
+      case 'ShiftRight':
+        this.isSprinting = false;
         break;
     }
   }
@@ -534,6 +572,17 @@ class PennySnifferGame {
       this.removeOtherPlayer(data.playerId);
     });
 
+    // Handle new coins spawning during game
+    this.socket.on('coins_spawned', (data: { coins: Array<{ id: string; position: { x: number; y: number; z: number } }> }) => {
+      console.log(`🪙 ${data.coins.length} new coins spawned!`);
+      for (const coin of data.coins) {
+        this.spawnPenny(coin.id, coin.position);
+      }
+      this.ui.updatePenniesLeft(this.pennies.size);
+      // Play a subtle spawn sound
+      this.playSpawnSound();
+    });
+
     this.socket.on('game_end', (data: any) => {
       this.endGame(data);
       // Leave voice chat when game ends
@@ -546,8 +595,14 @@ class PennySnifferGame {
       this.resetGame(data);
     });
 
-    this.socket.on('rewards_distributed', (_data: any) => {
-      this.ui.showMessage('🎉 Rewards distributed!', 'success');
+    this.socket.on('rewards_distributed', (data: any) => {
+      console.log('Rewards distributed:', data);
+      if (data.success && data.results) {
+        // Show Solscan links for each winner
+        this.ui.showRewardResults(data.results);
+      } else {
+        this.ui.showMessage('⚠️ Reward distribution had issues', 'error');
+      }
     });
   }
 
@@ -921,7 +976,8 @@ class PennySnifferGame {
     this.direction.x = Number(this.moveRight) - Number(this.moveLeft);
     this.direction.normalize();
 
-    const speed = 5; // Reduced from 15 to 5 for realistic walking speed
+    const baseSpeed = 12; // Base walking speed
+    const speed = this.isSprinting ? baseSpeed * 1.8 : baseSpeed; // Sprint is 80% faster
 
     // Store previous position for collision
     const prevX = this.camera.position.x;
@@ -1081,13 +1137,17 @@ class PennySnifferGame {
     this.renderer.setSize(window.innerWidth, window.innerHeight);
   }
 
-  private animate = (): void => {
+  private lastTime: number = 0;
+
+  private animate = (currentTime: number = 0): void => {
     requestAnimationFrame(this.animate);
 
-    const delta = 0.016; // ~60fps
+    // Calculate actual delta time for smooth movement regardless of frame rate
+    const delta = Math.min((currentTime - this.lastTime) / 1000, 0.1); // Cap at 100ms to prevent huge jumps
+    this.lastTime = currentTime;
 
     if (this.isPlaying) {
-      this.updatePlayer(delta);
+      this.updatePlayer(delta || 0.016); // Fallback to 60fps if delta is 0
       this.animatePennies();
       this.renderer.render(this.scene, this.camera);
     }

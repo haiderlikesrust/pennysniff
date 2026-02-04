@@ -10,7 +10,10 @@ class SolanaService {
         this.rewardWallet = null;
 
         // Fee configuration (in SOL)
-        this.feeReserve = parseFloat(process.env.FEE_RESERVE_SOL) || 0.01; // Keep 0.01 SOL for transaction fees
+        this.feeReserve = parseFloat(process.env.FEE_RESERVE_SOL) || 0.01;
+        
+        // Total reward pool per game (in SOL) - configurable via env
+        this.rewardPoolPerGame = parseFloat(process.env.REWARD_POOL_PER_GAME) || 0.05;
 
         this.initialize();
     }
@@ -18,6 +21,7 @@ class SolanaService {
     initialize() {
         try {
             this.connection = new Connection(this.rpcUrl, 'confirmed');
+            console.log('🌐 Connected to Solana RPC:', this.rpcUrl.includes('helius') ? 'Helius RPC' : 'Public RPC');
 
             // Load reward wallet if private key exists
             const privateKey = process.env.REWARD_WALLET_PRIVATE_KEY;
@@ -28,6 +32,14 @@ class SolanaService {
                     const secretKey = bs58.decode(privateKey);
                     this.rewardWallet = Keypair.fromSecretKey(secretKey);
                     console.log('💰 Reward wallet loaded:', this.rewardWallet.publicKey.toString());
+                    
+                    // Check balance on startup
+                    this.getBalance(this.rewardWallet.publicKey.toString()).then(balance => {
+                        console.log(`💰 Reward wallet balance: ${balance.toFixed(4)} SOL`);
+                        if (balance < this.rewardPoolPerGame + this.feeReserve) {
+                            console.warn(`⚠️ Warning: Low balance! Need at least ${(this.rewardPoolPerGame + this.feeReserve).toFixed(4)} SOL for rewards + fees`);
+                        }
+                    });
                 } catch (e) {
                     // Try JSON array format
                     try {
@@ -36,10 +48,12 @@ class SolanaService {
                         console.log('💰 Reward wallet loaded:', this.rewardWallet.publicKey.toString());
                     } catch (e2) {
                         console.error('❌ Failed to load reward wallet - invalid private key format');
+                        console.error('   Expected: base58 encoded string OR JSON array of bytes');
                     }
                 }
             } else {
-                console.log('⚠️ No reward wallet configured - rewards will be simulated');
+                console.log('⚠️ No reward wallet configured - rewards will be SIMULATED');
+                console.log('   Set REWARD_WALLET_PRIVATE_KEY in .env to enable real rewards');
             }
         } catch (error) {
             console.error('Failed to initialize Solana service:', error);
@@ -74,187 +88,39 @@ class SolanaService {
         return await this.getBalance(this.rewardWallet.publicKey.toString());
     }
 
-    // Get distributable amount (total - fee reserve)
-    async getDistributableAmount() {
-        const totalBalance = await this.getRewardPoolBalance();
-        const distributable = Math.max(0, totalBalance - this.feeReserve);
-        return {
-            total: totalBalance,
-            feeReserve: this.feeReserve,
-            distributable: distributable
-        };
-    }
-
-    // Send reward to winner
-    async sendReward(recipientAddress, percentOfDistributable) {
-        if (!this.rewardWallet) {
-            console.log(`[SIMULATED] Sending ${percentOfDistributable}% of pool to ${recipientAddress}`);
-            return { success: true, simulated: true, amount: 0 };
-        }
-
-        try {
-            // Get distributable amount (excluding fee reserve)
-            const { distributable, total, feeReserve } = await this.getDistributableAmount();
-
-            console.log(`💰 Pool Status: Total=${total.toFixed(4)} SOL, Reserved for fees=${feeReserve} SOL, Distributable=${distributable.toFixed(4)} SOL`);
-
-            if (distributable <= 0) {
-                console.log('⚠️ Insufficient distributable balance (need to keep fee reserve)');
-                return { success: false, error: 'Insufficient balance after fee reserve' };
-            }
-
-            const rewardAmount = (distributable * percentOfDistributable) / 100;
-            const lamports = Math.floor(rewardAmount * LAMPORTS_PER_SOL);
-
-            if (lamports <= 0) {
-                console.log('⚠️ Reward amount too small to send');
-                return { success: false, error: 'Reward amount too small' };
-            }
-
-            // Validate recipient address
-            if (!this.isValidAddress(recipientAddress)) {
-                console.log('❌ Invalid recipient address:', recipientAddress);
-                return { success: false, error: 'Invalid recipient address' };
-            }
-
-            const recipientPubkey = new PublicKey(recipientAddress);
-
-            // Get recent blockhash
-            const { blockhash } = await this.connection.getLatestBlockhash();
-
-            const transaction = new Transaction().add(
-                SystemProgram.transfer({
-                    fromPubkey: this.rewardWallet.publicKey,
-                    toPubkey: recipientPubkey,
-                    lamports
-                })
-            );
-
-            transaction.recentBlockhash = blockhash;
-            transaction.feePayer = this.rewardWallet.publicKey;
-
-            // Sign and send transaction
-            const signature = await this.connection.sendTransaction(transaction, [this.rewardWallet]);
-
-            // Wait for confirmation
-            console.log(`⏳ Waiting for confirmation... TX: ${signature}`);
-            const confirmation = await this.connection.confirmTransaction(signature, 'confirmed');
-
-            if (confirmation.value.err) {
-                console.log('❌ Transaction failed:', confirmation.value.err);
-                return { success: false, error: confirmation.value.err };
-            }
-
-            console.log(`✅ Sent ${rewardAmount.toFixed(4)} SOL to ${recipientAddress}`);
-            console.log(`   Transaction: https://solscan.io/tx/${signature}`);
-
-            return {
-                success: true,
-                signature,
-                amount: rewardAmount,
-                txUrl: `https://solscan.io/tx/${signature}`
-            };
-        } catch (error) {
-            console.error('Error sending reward:', error.message);
-            return { success: false, error: error.message };
-        }
-    }
-
-    // Distribute rewards to top players (supports 1-3 winners with proportional rewards)
-    async distributeRewards(winners, rewardPercents) {
-        const results = [];
-
-        // Get pool info first
-        const poolInfo = await this.getDistributableAmount();
-        console.log('\n🏆 === DISTRIBUTING REWARDS ===');
-        console.log(`   Pool Total: ${poolInfo.total.toFixed(4)} SOL`);
-        console.log(`   Fee Reserve: ${poolInfo.feeReserve} SOL`);
-        console.log(`   Distributable: ${poolInfo.distributable.toFixed(4)} SOL`);
-        console.log(`   Winners: ${winners.length}`);
-
-        if (poolInfo.distributable <= 0) {
-            console.log('❌ No funds available for distribution');
-            return { success: false, results: [], error: 'Insufficient funds' };
-        }
-
-        if (!winners || winners.length === 0) {
-            return { success: false, error: 'No winners to reward' };
-        }
-
-        console.log(`\n💳 SOLANA SERVICE: Distributing rewards to ${winners.length} winners`);
-        let successCount = 0;
-
-        try {
-            // Check balance first
-            const balance = await this.connection.getBalance(this.rewardWallet.publicKey);
-            console.log(`💳 Wallet Balance: ${balance / LAMPORTS_PER_SOL} SOL`);
-
-            // Total pool (this logic might need adjustment based on how 'pool' is defined, 
-            // for now assume we send a fixed amount per game or based on accumulation)
-            // But here we use 'rewardPercents' to distribute the FEE_RESERVE_SOL (or a specific pool amount)
-            // WARNING: The previous logic sent 0.05 * percent. Let's make it clearer.
-            // Let's assume the TOTAL reward pool for this round is 0.1 SOL (example) or derived from fees.
-            // For this implementation, we'll keep the logic simple: distribute a fixed pot of e.g. 0.05 SOL
-            const TOTAL_POT = 0.05;
-            console.log(`💰 Total Pot for this round: ${TOTAL_POT} SOL`);
-
-            for (let i = 0; i < winners.length; i++) {
-                const winner = winners[i];
-                const percent = rewardPercents[i]; // 0-100
-                const amountSOL = (TOTAL_POT * percent) / 100;
-
-                console.log(`   Processing Winner #${i + 1}: ${winner.walletAddress}`);
-                console.log(`      Share: ${percent.toFixed(2)}% -> ${amountSOL.toFixed(6)} SOL`);
-
-                if (amountSOL < 0.000001) {
-                    console.log('      ⚠️ Amount too small, skipping.');
-                    results.push({ wallet: winner.walletAddress, status: 'skipped_too_small', amount: amountSOL });
-                    continue;
-                }
-
-                try {
-                    const signature = await this.sendSOL(winner.walletAddress, amountSOL);
-                    console.log(`      ✅ Sent! Sig: ${signature}`);
-                    results.push({ wallet: winner.walletAddress, status: 'sent', signature, amount: amountSOL });
-                    successCount++;
-                } catch (err) {
-                    console.error(`      ❌ Failed to send to ${winner.walletAddress}:`, err.message);
-                    results.push({ wallet: winner.walletAddress, status: 'failed', error: err.message, amount: amountSOL });
-                }
-            }
-
-            return {
-                success: successCount > 0,
-                results,
-                totalDistributed: results.filter(r => r.status === 'sent').reduce((acc, r) => acc + r.amount, 0)
-            };
-
-        } catch (error) {
-            console.error('💳 SOLANA SERVICE ERROR:', error);
-            return { success: false, error: error.message };
-        }
-    }
-
-    // New method to send a direct SOL amount (inferred from the user's requested change)
+    // Send SOL to a recipient
     async sendSOL(recipientAddress, amountSOL) {
         if (!this.rewardWallet) {
-            console.log(`[SIMULATED] Sending ${amountSOL.toFixed(6)} SOL to ${recipientAddress}`);
-            return 'SIMULATED_TX_SIGNATURE'; // Return a dummy signature for simulation
+            console.log(`[SIMULATED] Would send ${amountSOL.toFixed(6)} SOL to ${recipientAddress}`);
+            return { 
+                success: true, 
+                simulated: true, 
+                amount: amountSOL,
+                signature: 'SIMULATED_' + Date.now(),
+                txUrl: null
+            };
         }
 
         try {
             const lamports = Math.floor(amountSOL * LAMPORTS_PER_SOL);
 
             if (lamports <= 0) {
-                throw new Error('Amount too small to send');
+                return { success: false, error: 'Amount too small to send' };
             }
 
             if (!this.isValidAddress(recipientAddress)) {
-                throw new Error('Invalid recipient address');
+                return { success: false, error: 'Invalid recipient address' };
+            }
+
+            // Check balance
+            const balance = await this.getBalance(this.rewardWallet.publicKey.toString());
+            if (balance < amountSOL + 0.001) { // 0.001 SOL for tx fee
+                console.error(`❌ Insufficient balance: ${balance.toFixed(4)} SOL, need ${(amountSOL + 0.001).toFixed(4)} SOL`);
+                return { success: false, error: 'Insufficient balance in reward wallet' };
             }
 
             const recipientPubkey = new PublicKey(recipientAddress);
-            const { blockhash } = await this.connection.getLatestBlockhash();
+            const { blockhash, lastValidBlockHeight } = await this.connection.getLatestBlockhash('confirmed');
 
             const transaction = new Transaction().add(
                 SystemProgram.transfer({
@@ -267,14 +133,125 @@ class SolanaService {
             transaction.recentBlockhash = blockhash;
             transaction.feePayer = this.rewardWallet.publicKey;
 
-            const signature = await this.connection.sendTransaction(transaction, [this.rewardWallet]);
-            await this.connection.confirmTransaction(signature, 'confirmed');
+            // Sign and send
+            console.log(`📤 Sending ${amountSOL.toFixed(6)} SOL to ${recipientAddress.slice(0, 8)}...`);
+            const signature = await this.connection.sendTransaction(transaction, [this.rewardWallet], {
+                skipPreflight: false,
+                preflightCommitment: 'confirmed'
+            });
 
-            return signature;
+            // Wait for confirmation with timeout
+            console.log(`⏳ Waiting for confirmation... TX: ${signature}`);
+            const confirmation = await this.connection.confirmTransaction({
+                signature,
+                blockhash,
+                lastValidBlockHeight
+            }, 'confirmed');
+
+            if (confirmation.value.err) {
+                console.error('❌ Transaction failed:', confirmation.value.err);
+                return { success: false, error: 'Transaction failed on chain', signature };
+            }
+
+            const txUrl = `https://solscan.io/tx/${signature}`;
+            console.log(`✅ Sent ${amountSOL.toFixed(6)} SOL to ${recipientAddress.slice(0, 8)}...`);
+            console.log(`   🔗 ${txUrl}`);
+
+            return {
+                success: true,
+                signature,
+                amount: amountSOL,
+                txUrl
+            };
         } catch (error) {
-            console.error('Error in sendSOL:', error.message);
-            throw error; // Re-throw to be caught by distributeRewards
+            console.error('Error sending SOL:', error.message);
+            return { success: false, error: error.message };
         }
+    }
+
+    // Distribute rewards to top players with proportional rewards
+    async distributeRewards(winners, rewardPercents) {
+        const results = [];
+
+        console.log('\n🏆 ═══════════════════════════════════════');
+        console.log('🏆 DISTRIBUTING REWARDS');
+        console.log('🏆 ═══════════════════════════════════════');
+
+        if (!winners || winners.length === 0) {
+            console.log('❌ No winners to reward');
+            return { success: false, results: [], error: 'No winners' };
+        }
+
+        // Get current balance
+        const balance = await this.getRewardPoolBalance();
+        console.log(`💰 Reward Wallet Balance: ${balance.toFixed(4)} SOL`);
+        console.log(`💰 Reward Pool Per Game: ${this.rewardPoolPerGame} SOL`);
+        console.log(`👥 Winners: ${winners.length}`);
+
+        // Check if we have enough balance
+        const totalNeeded = this.rewardPoolPerGame + this.feeReserve;
+        if (balance < totalNeeded && this.rewardWallet) {
+            console.error(`❌ Insufficient balance! Have: ${balance.toFixed(4)} SOL, Need: ${totalNeeded.toFixed(4)} SOL`);
+            return { 
+                success: false, 
+                results: [], 
+                error: `Insufficient balance. Need ${totalNeeded.toFixed(4)} SOL but only have ${balance.toFixed(4)} SOL` 
+            };
+        }
+
+        // Normalize percentages to ensure they sum to 100%
+        const numWinners = Math.min(winners.length, 3);
+        const totalPercent = rewardPercents.slice(0, numWinners).reduce((a, b) => a + b, 0);
+        
+        console.log('\n📊 Reward Distribution:');
+        
+        for (let i = 0; i < numWinners; i++) {
+            const winner = winners[i];
+            const rawPercent = rewardPercents[i];
+            const normalizedPercent = (rawPercent / totalPercent) * 100;
+            const amountSOL = (this.rewardPoolPerGame * normalizedPercent) / 100;
+
+            console.log(`\n🎖️ Place ${i + 1}: ${winner.walletAddress}`);
+            console.log(`   Coins: ${winner.score}`);
+            console.log(`   Share: ${normalizedPercent.toFixed(2)}%`);
+            console.log(`   Amount: ${amountSOL.toFixed(6)} SOL`);
+
+            const result = await this.sendSOL(winner.walletAddress, amountSOL);
+            
+            results.push({
+                place: i + 1,
+                wallet: winner.walletAddress,
+                coins: winner.score,
+                percent: normalizedPercent,
+                amount: amountSOL,
+                success: result.success,
+                signature: result.signature || null,
+                txUrl: result.txUrl || null,
+                simulated: result.simulated || false,
+                error: result.error || null
+            });
+
+            // Small delay between transactions
+            if (i < numWinners - 1 && result.success && !result.simulated) {
+                await new Promise(resolve => setTimeout(resolve, 500));
+            }
+        }
+
+        const successCount = results.filter(r => r.success).length;
+        const totalDistributed = results.filter(r => r.success).reduce((sum, r) => sum + r.amount, 0);
+
+        console.log('\n🏆 ═══════════════════════════════════════');
+        console.log(`🏆 DISTRIBUTION COMPLETE`);
+        console.log(`   ✅ Successful: ${successCount}/${numWinners}`);
+        console.log(`   💰 Total Distributed: ${totalDistributed.toFixed(6)} SOL`);
+        console.log('🏆 ═══════════════════════════════════════\n');
+
+        return {
+            success: successCount > 0,
+            results,
+            totalDistributed,
+            successCount
+        };
     }
 }
 

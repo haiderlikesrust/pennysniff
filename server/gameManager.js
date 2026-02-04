@@ -142,10 +142,43 @@ class GameManager {
                 total: this.gameDurationSeconds
             });
 
+            // Spawn random coins every 10 seconds
+            if (Math.floor(elapsed) % 10 === 0 && Math.floor(elapsed) > 0) {
+                this.spawnRandomCoins(5); // Spawn 5 coins every 10 seconds
+            }
+
             if (remaining <= 0) {
                 this.endGame();
             }
         }, 1000);
+    }
+
+    // Spawn random coins during the game
+    spawnRandomCoins(count) {
+        const newCoins = [];
+        const baseId = Date.now();
+        
+        for (let i = 0; i < count; i++) {
+            const id = `penny_spawn_${baseId}_${i}`;
+            const position = {
+                x: (Math.random() - 0.5) * this.mapSize,
+                y: 0.1,
+                z: (Math.random() - 0.5) * this.mapSize
+            };
+            
+            this.pennies.set(id, {
+                position,
+                collected: false
+            });
+            
+            newCoins.push({ id, position });
+        }
+        
+        // Notify all players about new coins
+        if (newCoins.length > 0) {
+            this.io.emit('coins_spawned', { coins: newCoins });
+            console.log(`🪙 Spawned ${count} new coins! Total: ${this.pennies.size}`);
+        }
     }
 
     // Generate pennies in the world - Updated for bigger map

@@ -197,6 +197,63 @@ export class UI {
         }
     }
 
+    // Show reward distribution results with Solscan links
+    showRewardResults(results: Array<{
+        place: number;
+        wallet: string;
+        amount: number;
+        success: boolean;
+        txUrl: string | null;
+        simulated: boolean;
+        error: string | null;
+    }>): void {
+        // Create a modal/overlay to show reward results
+        let overlay = document.getElementById('reward-overlay');
+        if (!overlay) {
+            overlay = document.createElement('div');
+            overlay.id = 'reward-overlay';
+            overlay.className = 'reward-overlay';
+            document.body.appendChild(overlay);
+        }
+
+        let html = `
+            <div class="reward-modal">
+                <h2>🎉 Rewards Distributed!</h2>
+                <div class="reward-list">
+        `;
+
+        for (const result of results) {
+            const medal = result.place === 1 ? '🥇' : result.place === 2 ? '🥈' : '🥉';
+            const walletShort = result.wallet.slice(0, 6) + '...' + result.wallet.slice(-4);
+            const statusIcon = result.success ? '✅' : '❌';
+            const statusText = result.simulated ? '(Simulated)' : result.success ? 'Sent!' : result.error || 'Failed';
+
+            html += `
+                <div class="reward-item ${result.success ? 'success' : 'failed'}">
+                    <div class="reward-place">${medal} #${result.place}</div>
+                    <div class="reward-wallet">${walletShort}</div>
+                    <div class="reward-amount">${result.amount.toFixed(6)} SOL</div>
+                    <div class="reward-status">${statusIcon} ${statusText}</div>
+                    ${result.txUrl ? `<a href="${result.txUrl}" target="_blank" class="reward-link">🔗 View on Solscan</a>` : ''}
+                </div>
+            `;
+        }
+
+        html += `
+                </div>
+                <button class="reward-close-btn" onclick="document.getElementById('reward-overlay').style.display='none'">Close</button>
+            </div>
+        `;
+
+        overlay.innerHTML = html;
+        overlay.style.display = 'flex';
+
+        // Auto-hide after 15 seconds
+        setTimeout(() => {
+            if (overlay) overlay.style.display = 'none';
+        }, 15000);
+    }
+
     // Voice chat UI methods
     updateVoiceStatus(inVoice: boolean, muted: boolean): void {
         const voiceBtn = document.getElementById('voice-btn');
